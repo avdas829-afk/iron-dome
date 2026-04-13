@@ -1,0 +1,5 @@
+{
+  "name": "Iron Dome Command",
+  "description": "A tactical missile defense simulator with manual and automated interception modes.",
+  "requestFramePermissions": []
+}
