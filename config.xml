@@ -13,7 +13,7 @@
     
     <preference name="Orientation" value="portrait" />
     <preference name="Fullscreen" value="true" />
-    <preference name="BackgroundColor" value="0xff0f172a" />
+    <preference name="BackgroundColor" value="#0f172a" />
     
     <platform name="android">
         <allow-intent href="market:*" />
