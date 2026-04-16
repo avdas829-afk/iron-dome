@@ -1,0 +1,9 @@
+<resources>
+    <!-- Base application theme. -->
+    <style name="Theme.IronDome" parent="Theme.AppCompat.Light.NoActionBar">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">#0f172a</item>
+        <item name="colorPrimaryDark">#020617</item>
+        <item name="colorAccent">#10b981</item>
+    </style>
+</resources>
