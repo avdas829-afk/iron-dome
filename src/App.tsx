@@ -8,7 +8,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Shield, 
   Target, 
-  Zap, 
+  Volume2,
+  VolumeX,
   AlertTriangle, 
   Activity,
   Crosshair,
@@ -222,6 +223,8 @@ class Missile {
   isFromJet: boolean;
   isBomber: boolean = false;
   isDetected: boolean = false;
+  requiredTaps: number = 0;
+  currentTaps: number = 0;
   lockStartTime: number | null = null;
   exploded: boolean = false;
   trail: Point[] = [];
@@ -242,6 +245,15 @@ class Missile {
     const angle = Math.atan2(target.y - start.y, target.x - start.x);
     this.vx = Math.cos(angle) * speed;
     this.vy = Math.sin(angle) * speed;
+
+    if (this.isBomber) {
+      // Map speed to 3-8 taps
+      // Min bomber speed approx 0.126, Max approx 0.3675
+      const minS = ENEMY_SPEED_MIN * 0.6;
+      const maxS = ENEMY_SPEED_MAX * 0.6;
+      const t = 3 + ((speed - minS) / (maxS - minS)) * 5;
+      this.requiredTaps = Math.max(3, Math.min(8, Math.round(t)));
+    }
   }
 
   update() {
@@ -383,8 +395,20 @@ class Missile {
       
       // "LOCKED" text
       ctx.fillStyle = '#ef4444';
-      ctx.font = 'bold 8px monospace';
-      ctx.fillText('LOCK', this.x + size, this.y - size);
+      ctx.font = 'bold 10px monospace';
+      ctx.fillText('LOCKED', this.x + size, this.y - size);
+    } else if (this.isBomber && !this.isDetected && this.currentTaps > 0) {
+      // Draw tap progress
+      ctx.fillStyle = '#f59e0b';
+      ctx.font = 'bold 9px monospace';
+      ctx.fillText(`TAP ${this.currentTaps}/${this.requiredTaps}`, this.x + 15, this.y - 15);
+      
+      // Ring progress
+      ctx.beginPath();
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 2;
+      ctx.arc(this.x, this.y, 15, -Math.PI/2, -Math.PI/2 + (Math.PI * 2 * (this.currentTaps / this.requiredTaps)));
+      ctx.stroke();
     }
 
     // Draw target marker for interceptors
@@ -806,12 +830,10 @@ export default function App() {
         inSweep = normAngle >= sweepAngle || normAngle <= sweepEnd;
       }
       
-      if (distToB < RADAR_RANGE && inSweep) {
-        if (!m.isDetected) {
-          m.isDetected = true;
-          m.lockStartTime = Date.now();
-          soundManager.playRadar();
-        }
+      if (distToB < RADAR_RANGE && inSweep && !m.isDetected) {
+        m.isDetected = true;
+        m.lockStartTime = Date.now();
+        soundManager.playRadar();
       }
 
       m.update();
@@ -920,9 +942,28 @@ export default function App() {
     const rect = canvas.getBoundingClientRect();
     const x = (e.clientX - rect.left) * (CANVAS_WIDTH / rect.width);
     const y = (e.clientY - rect.top) * (CANVAS_HEIGHT / rect.height);
+
+    // Check if clicked an enemy to lock (especially bombers)
+    let clickedEnemy = false;
+    enemiesRef.current.forEach(en => {
+      const dist = Math.hypot(en.x - x, en.y - y);
+      const radius = en.isBomber ? 30 : 20; // Allow a generous hit area for locking
+      
+      if (dist < radius && !en.isDetected && en.isBomber) {
+        clickedEnemy = true;
+        en.currentTaps++;
+        if (en.currentTaps >= en.requiredTaps) {
+          en.isDetected = true;
+          en.lockStartTime = Date.now();
+          soundManager.playRadar();
+        }
+      }
+    });
     
-    // Fire from battery
-    fireInterceptor(x, y, BATTERY_X, BATTERY_Y);
+    if (!clickedEnemy) {
+      // Fire from battery if not locking an enemy
+      fireInterceptor(x, y, BATTERY_X, BATTERY_Y);
+    }
   };
 
   const resetGame = () => {
@@ -954,9 +995,9 @@ export default function App() {
               className="p-2 hover:bg-slate-800 rounded-full transition-colors"
             >
               {isMuted ? (
-                <Zap className="w-4 h-4 text-slate-500" />
+                <VolumeX className="w-5 h-5 text-slate-500" />
               ) : (
-                <Zap className="w-4 h-4 text-emerald-500 fill-current" />
+                <Volume2 className="w-5 h-5 text-emerald-500" />
               )}
             </button>
           </div>
