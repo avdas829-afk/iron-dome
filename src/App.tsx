@@ -31,13 +31,13 @@ interface GameState {
   missilesIntercepted: number;
 }
 
-// --- Constants ---
+// --- Dynamic Dimensions (Responsive to Portables and Display Aspect Ratios) ---
 
-const CANVAS_WIDTH = 380;
-const CANVAS_HEIGHT = 420;
+let CANVAS_WIDTH = 380;
+let CANVAS_HEIGHT = 600;
 const GROUND_HEIGHT = 40;
-const BATTERY_X = CANVAS_WIDTH * 0.5;
-const BATTERY_Y = CANVAS_HEIGHT - GROUND_HEIGHT;
+let BATTERY_X = CANVAS_WIDTH * 0.5;
+let BATTERY_Y = CANVAS_HEIGHT - GROUND_HEIGHT;
 const INTERCEPTOR_SPEED = 3.2;
 const ENEMY_SPEED_MIN = 0.21;
 const ENEMY_SPEED_MAX = 0.6125;
@@ -626,6 +626,34 @@ class FighterJet {
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [dimensions, setDimensions] = useState({ width: 380, height: 600 });
+
+  useEffect(() => {
+    const handleResize = () => {
+      const w = window.innerWidth || 380;
+      const h = window.innerHeight || 600;
+      const aspect = w / h;
+      
+      // Keep a stable vertical height (e.g. 600) for standard drop speed of missiles
+      const height = 600;
+      const width = Math.round(height * aspect);
+      
+      CANVAS_WIDTH = width;
+      CANVAS_HEIGHT = height;
+      BATTERY_X = width * 0.5;
+      BATTERY_Y = height - GROUND_HEIGHT;
+      
+      setDimensions({ width, height });
+    };
+
+    window.addEventListener('resize', handleResize);
+    handleResize();
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
+
   const [gameState, setGameState] = useState<GameState>({
     health: 100,
     score: 0,
@@ -930,7 +958,7 @@ export default function App() {
     soundManager.setMute(isMuted);
   }, [isMuted]);
 
-  const handleCanvasClick = (e: React.MouseEvent) => {
+  const handleCanvasClick = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (gameState.isGameOver) return;
     
     // Initialize sound on first click
@@ -981,50 +1009,19 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-mono overflow-hidden flex flex-col items-center justify-center p-4">
-      {/* Header HUD */}
-      <div className="w-full max-w-[380px] flex flex-col gap-1 mb-3 px-1">
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 text-emerald-500">
-              <Shield className="w-4 h-4" />
-              <span className="text-2xl font-black tracking-tighter">{gameState.health}%</span>
-            </div>
-            <button 
-              onClick={() => setIsMuted(!isMuted)}
-              className="p-2 hover:bg-slate-800 rounded-full transition-colors"
-            >
-              {isMuted ? (
-                <VolumeX className="w-5 h-5 text-slate-500" />
-              ) : (
-                <Volume2 className="w-5 h-5 text-emerald-500" />
-              )}
-            </button>
-          </div>
-          <div className="text-2xl font-black text-white tabular-nums tracking-tight">
-            {gameState.score.toLocaleString()}
-          </div>
-        </div>
-        <div className="flex justify-between text-[10px] uppercase tracking-[0.2em] text-slate-500 font-bold">
-          <span>Threat Level {gameState.level}</span>
-          <span>Interceptions {gameState.missilesIntercepted}</span>
-        </div>
-      </div>
-
-      {/* Game Stage */}
+    <div className="w-screen h-[100dvh] bg-slate-950 text-slate-200 font-mono overflow-hidden relative select-none">
+      {/* Game Stage (True Fullscreen behind everything) */}
       <div 
-        className="relative border-2 border-slate-800 rounded-lg overflow-hidden shadow-2xl shadow-emerald-500/5 cursor-crosshair"
+        className="absolute inset-0 w-full h-full overflow-hidden cursor-crosshair z-0"
         style={{ 
           transform: `translate(${Math.random() * shake - shake/2}px, ${Math.random() * shake - shake/2}px)`,
-          width: '380px',
-          height: '420px'
         }}
       >
         <canvas
           ref={canvasRef}
-          width={CANVAS_WIDTH}
-          height={CANVAS_HEIGHT}
-          onMouseDown={handleCanvasClick}
+          width={dimensions.width}
+          height={dimensions.height}
+          onPointerDown={handleCanvasClick}
           className="w-full h-full block"
         />
 
@@ -1034,7 +1031,7 @@ export default function App() {
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="absolute inset-0 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center text-center p-8"
+              className="absolute inset-0 bg-slate-950/95 backdrop-blur-md flex flex-col items-center justify-center text-center p-8 z-25 pointer-events-auto"
             >
               <motion.div
                 initial={{ scale: 0.9, y: 20 }}
@@ -1049,7 +1046,7 @@ export default function App() {
                 </p>
                 <button 
                   onClick={resetGame}
-                  className="group flex items-center gap-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-8 py-4 rounded font-black uppercase tracking-widest transition-all hover:scale-105 active:scale-95"
+                  className="group flex items-center gap-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-8 py-4 rounded font-black uppercase tracking-widest transition-all hover:scale-105 active:scale-95 mx-auto"
                 >
                   <RotateCcw className="w-5 h-5 group-hover:rotate-180 transition-transform duration-500" />
                   Re-Initialize System
@@ -1060,9 +1057,40 @@ export default function App() {
         </AnimatePresence>
       </div>
 
-      {/* Controls Footer */}
-      <div className="w-full max-w-[380px] mt-6 flex flex-col gap-3 px-1">
-        <div className="flex justify-between items-center px-1 text-[9px] text-slate-500 uppercase tracking-widest font-bold">
+      {/* Floating Header HUD */}
+      <div className="absolute top-0 left-0 right-0 z-10 p-4 pt-[calc(env(safe-area-inset-top)+1rem)] max-w-lg mx-auto pointer-events-none select-none">
+        <div className="w-full flex flex-col gap-1 pointer-events-auto bg-slate-950/45 backdrop-blur-xs p-3 rounded-lg border border-slate-900/50">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 text-emerald-500">
+                <Shield className="w-5 h-5" />
+                <span className="text-2xl font-black tracking-tighter">{gameState.health}%</span>
+              </div>
+              <button 
+                onClick={() => setIsMuted(!isMuted)}
+                className="p-2 hover:bg-slate-800/80 bg-slate-900/30 rounded-full transition-colors border border-slate-800/30"
+              >
+                {isMuted ? (
+                  <VolumeX className="w-5 h-5 text-slate-400" />
+                ) : (
+                  <Volume2 className="w-5 h-5 text-emerald-400 fill-current" />
+                )}
+              </button>
+            </div>
+            <div className="text-2xl font-black text-white tabular-nums tracking-tight filter drop-shadow">
+              {gameState.score.toLocaleString()}
+            </div>
+          </div>
+          <div className="flex justify-between text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold">
+            <span>Threat Level {gameState.level}</span>
+            <span>Interceptions {gameState.missilesIntercepted}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Floating Controls Footer */}
+      <div className="absolute bottom-0 left-0 right-0 z-10 p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pointer-events-none select-none text-center">
+        <div className="max-w-lg mx-auto flex justify-between items-center px-3 py-2 text-[9px] text-slate-400 uppercase tracking-widest font-bold bg-slate-950/45 backdrop-blur-xs rounded-lg border border-slate-900/50 pointer-events-auto">
           <div className="flex items-center gap-2">
             <Crosshair className="w-3.5 h-3.5" />
             Manual Control
@@ -1074,8 +1102,8 @@ export default function App() {
         </div>
       </div>
 
-      {/* Decorative Elements */}
-      <div className="fixed top-0 left-0 w-full h-full pointer-events-none opacity-20 overflow-hidden">
+      {/* Decorative Glows */}
+      <div className="fixed top-0 left-0 w-full h-full pointer-events-none opacity-20 overflow-hidden z-0">
         <div className="absolute top-1/4 -left-20 w-64 h-64 bg-emerald-500/20 blur-[120px] rounded-full" />
         <div className="absolute bottom-1/4 -right-20 w-64 h-64 bg-cyan-500/20 blur-[120px] rounded-full" />
       </div>
