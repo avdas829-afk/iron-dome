@@ -317,6 +317,8 @@ class SoundManager {
   private masterGain: GainNode | null = null;
   private isMuted: boolean = false;
   private bgOsc: OscillatorNode | null = null;
+  private musicInterval: any = null;
+  private musicStep = 0;
 
   init() {
     if (this.ctx) return;
@@ -325,6 +327,7 @@ class SoundManager {
     this.masterGain.connect(this.ctx.destination);
     this.masterGain.gain.value = 0.3;
     this.startBackgroundDrone();
+    this.startBackgroundMusic();
   }
 
   setMute(mute: boolean) {
@@ -365,6 +368,109 @@ class SoundManager {
     lfo.connect(lfoGain);
     lfoGain.connect(filter.frequency);
     lfo.start();
+  }
+
+  private startBackgroundMusic() {
+    if (!this.ctx || !this.masterGain) return;
+
+    // A minor pentatonic scale notes (harmony roots)
+    const progressions = [
+      [110.00, 164.81, 220.00], // Am root chord
+      [130.81, 196.00, 261.63], // C major root chord
+      [146.83, 220.00, 293.66], // Dm root chord
+      [164.81, 246.94, 329.63]  // Em root chord
+    ];
+
+    let currentProgIndex = 0;
+
+    this.musicInterval = setInterval(() => {
+      if (this.isMuted || !this.ctx || this.ctx.state === 'suspended') return;
+
+      const currentTime = this.ctx.currentTime;
+      this.musicStep++;
+
+      if (this.musicStep % 16 === 0) {
+        currentProgIndex = (currentProgIndex + 1) % progressions.length;
+      }
+
+      const currentProg = progressions[currentProgIndex];
+
+      // Deep sub bass step on beat
+      if (this.musicStep % 4 === 0) {
+        const bassOsc = this.ctx.createOscillator();
+        const bassGain = this.ctx.createGain();
+        const bassFilter = this.ctx.createBiquadFilter();
+
+        bassOsc.type = 'triangle';
+        bassOsc.frequency.setValueAtTime(currentProg[0] / 2, currentTime);
+
+        bassFilter.type = 'lowpass';
+        bassFilter.frequency.setValueAtTime(120, currentTime);
+
+        bassGain.gain.setValueAtTime(0.08, currentTime);
+        bassGain.gain.exponentialRampToValueAtTime(0.001, currentTime + 0.6);
+
+        bassOsc.connect(bassFilter);
+        bassFilter.connect(bassGain);
+        bassGain.connect(this.masterGain);
+
+        bassOsc.start(currentTime);
+        bassOsc.stop(currentTime + 0.6);
+      }
+
+      // Arpeggiated synthesizer line
+      const stepModulo = this.musicStep % 8;
+      if (stepModulo === 0 || stepModulo === 2 || stepModulo === 4 || stepModulo === 6 || Math.random() < 0.25) {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const filter = this.ctx.createBiquadFilter();
+
+        const chordNote = currentProg[Math.floor(Math.random() * currentProg.length)];
+        const octave = Math.random() < 0.35 ? 2 : 1;
+
+        osc.type = Math.random() < 0.6 ? 'sine' : 'triangle';
+        osc.frequency.setValueAtTime(chordNote * octave, currentTime);
+
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(600, currentTime);
+
+        gain.gain.setValueAtTime(0.02, currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, currentTime + 0.35);
+
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.masterGain);
+
+        osc.start(currentTime);
+        osc.stop(currentTime + 0.35);
+      }
+
+      // Tactical hi-hat/percussive click
+      if (this.musicStep % 2 === 1 && Math.random() < 0.6) {
+        const hhBuffer = this.ctx.createBuffer(1, this.ctx.sampleRate * 0.015, this.ctx.sampleRate);
+        const hhData = hhBuffer.getChannelData(0);
+        for (let i = 0; i < hhData.length; i++) {
+          hhData[i] = Math.random() * 2 - 1;
+        }
+
+        const hhSource = this.ctx.createBufferSource();
+        hhSource.buffer = hhBuffer;
+
+        const hhFilter = this.ctx.createBiquadFilter();
+        hhFilter.type = 'bandpass';
+        hhFilter.frequency.setValueAtTime(7500, currentTime);
+
+        const hhGain = this.ctx.createGain();
+        hhGain.gain.setValueAtTime(0.003, currentTime);
+        hhGain.gain.exponentialRampToValueAtTime(0.0001, currentTime + 0.015);
+
+        hhSource.connect(hhFilter);
+        hhFilter.connect(hhGain);
+        hhGain.connect(this.masterGain);
+
+        hhSource.start(currentTime);
+      }
+    }, 180);
   }
 
   playLaunch() {
@@ -489,6 +595,8 @@ class Missile {
   exploded: boolean = false;
   trail: Point[] = [];
   maxTrailLength = 20;
+  targetEnemy: Missile | null = null;
+  baseSpeed: number = 0;
 
   constructor(isEnemy: boolean, start: Point, target: Point, speed: number, isAuto: boolean = false, isFromJet: boolean = false, isBomber: boolean = false) {
     this.isEnemy = isEnemy;
@@ -501,17 +609,18 @@ class Missile {
     this.startY = start.y;
     this.targetX = target.x;
     this.targetY = target.y;
+    this.baseSpeed = speed;
 
     const angle = Math.atan2(target.y - start.y, target.x - start.x);
     this.vx = Math.cos(angle) * speed;
     this.vy = Math.sin(angle) * speed;
 
     if (this.isBomber) {
-      // Map speed to 3-8 taps based on realistic medium to very fast speeds
-      const minS = 1.2;
-      const maxS = 3.2;
-      const t = 3 + ((speed - minS) / (maxS - minS)) * 5;
-      this.requiredTaps = Math.max(3, Math.min(8, Math.round(t)));
+      // Slow bomber speed (0.4 to 0.8), tap count is between 3 and 6
+      const minS = 0.4;
+      const maxS = 0.8;
+      const t = 3 + ((speed - minS) / (maxS - minS || 1)) * 3;
+      this.requiredTaps = Math.max(3, Math.min(6, Math.round(t)));
     }
   }
 
@@ -519,6 +628,35 @@ class Missile {
     this.trail.push({ x: this.x, y: this.y });
     if (this.trail.length > this.maxTrailLength) {
       this.trail.shift();
+    }
+
+    // Dynamic Homing Track behavior for interceptor missiles
+    if (!this.isEnemy) {
+      if (this.targetEnemy && !this.targetEnemy.exploded && this.targetEnemy.y < BATTERY_Y) {
+        this.targetX = this.targetEnemy.x;
+        this.targetY = this.targetEnemy.y;
+      }
+      
+      const dx = this.targetX - this.x;
+      const dy = this.targetY - this.y;
+      const dist = Math.hypot(dx, dy);
+
+      const angle = Math.atan2(dy, dx);
+      let speed = this.baseSpeed;
+
+      if (this.targetEnemy) {
+        const enemySpeed = Math.hypot(this.targetEnemy.vx, this.targetEnemy.vy);
+        // Automatically speed up dynamically to catch fast/difficult targets
+        speed = Math.max(this.baseSpeed, enemySpeed * 1.5 + 1.2);
+        
+        // Boost speed if far away to close the gap rapidly
+        if (dist > 150) {
+          speed *= 1.35;
+        }
+      }
+
+      this.vx = Math.cos(angle) * speed;
+      this.vy = Math.sin(angle) * speed;
     }
 
     this.x += this.vx;
@@ -956,14 +1094,8 @@ export default function App() {
       
       let speed;
       if (isBomber) {
-        // "speed should be random very fast and medium"
-        if (Math.random() < 0.5) {
-          // Medium speed
-          speed = 1.2 + Math.random() * 0.6 + (currentLevel * 0.01);
-        } else {
-          // Very fast speed
-          speed = 2.2 + Math.random() * 1.0 + (currentLevel * 0.01);
-        }
+        // "now this time slow the speed of bomber"
+        speed = 0.4 + Math.random() * 0.4 + (currentLevel * 0.002);
       } else {
         // Regular red missile speed
         speed = ENEMY_SPEED_MIN + (Math.random() * (ENEMY_SPEED_MAX - ENEMY_SPEED_MIN)) + (currentLevel * 0.005);
@@ -988,14 +1120,39 @@ export default function App() {
       if (activeGroundInterceptors.length >= 1) return;
     }
 
-    interceptorsRef.current.push(new Missile(
+    const m = new Missile(
       false,
       { x: sourceX, y: sourceY },
       { x: targetX, y: targetY },
       INTERCEPTOR_SPEED,
       isAuto,
       isFromJet
-    ));
+    );
+
+    // Dynamic Homing: Find closest active enemy to target coordinates
+    let bestEnemy: Missile | null = null;
+    let bestDist = Infinity;
+    enemiesRef.current.forEach(e => {
+      if (!e.exploded && e.y < BATTERY_Y) {
+        if (isFromJet && !e.isBomber) return;
+        if (!isFromJet && e.isBomber && !e.isDetected) return; // Only lock on detected bombers from ground
+
+        const dist = Math.hypot(e.x - targetX, e.y - targetY);
+        // Generous lock matching range
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestEnemy = e;
+        }
+      }
+    });
+
+    if (bestEnemy) {
+      m.targetEnemy = bestEnemy;
+      m.targetX = bestEnemy!.x;
+      m.targetY = bestEnemy!.y;
+    }
+
+    interceptorsRef.current.push(m);
 
     if (!isFromJet) {
       soundManager.playLaunch();
