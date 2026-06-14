@@ -1178,14 +1178,16 @@ export default function App() {
     // Dynamic Homing: Find closest active enemy to target coordinates
     let bestEnemy: Missile | null = null;
     let bestDist = Infinity;
+    const maxLockDist = (isAuto || isFromJet) ? Infinity : 40; // Must pinpoint click within 40px of a missile to lock onto it manually
+
     enemiesRef.current.forEach(e => {
       if (!e.exploded && e.y < BATTERY_Y) {
         if (isFromJet && !e.isBomber) return;
         if (!isFromJet && e.isBomber && !e.isDetected) return; // Only lock on detected bombers from ground
 
         const dist = Math.hypot(e.x - targetX, e.y - targetY);
-        // Generous lock matching range
-        if (dist < bestDist) {
+        // Generous lock matching range within pinpoint circle
+        if (dist < maxLockDist && dist < bestDist) {
           bestDist = dist;
           bestEnemy = e;
         }
