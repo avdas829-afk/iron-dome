@@ -321,19 +321,31 @@ class SoundManager {
   private musicStep = 0;
 
   init() {
-    if (this.ctx) return;
+    if (this.ctx) {
+      this.resumeContext();
+      return;
+    }
     this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
     this.masterGain = this.ctx.createGain();
     this.masterGain.connect(this.ctx.destination);
-    this.masterGain.gain.value = 0.3;
+    this.masterGain.gain.value = 0.95; // High, audible master volume
     this.startBackgroundDrone();
     this.startBackgroundMusic();
+  }
+
+  private resumeContext() {
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
   }
 
   setMute(mute: boolean) {
     this.isMuted = mute;
     if (this.masterGain) {
-      this.masterGain.gain.value = mute ? 0 : 0.3;
+      this.masterGain.gain.value = mute ? 0 : 0.95;
+    }
+    if (!mute) {
+      this.resumeContext();
     }
   }
 
@@ -351,7 +363,7 @@ class SoundManager {
     filter.type = 'lowpass';
     filter.frequency.value = 200;
     
-    gain.gain.value = 0.05;
+    gain.gain.value = 0.12; // Louder, more present ambient rumble
 
     osc.connect(filter);
     filter.connect(gain);
@@ -363,8 +375,8 @@ class SoundManager {
     // LFO for movement
     const lfo = this.ctx.createOscillator();
     const lfoGain = this.ctx.createGain();
-    lfo.frequency.value = 0.1;
-    lfoGain.gain.value = 50;
+    lfo.frequency.value = 0.12;
+    lfoGain.gain.value = 60;
     lfo.connect(lfoGain);
     lfoGain.connect(filter.frequency);
     lfo.start();
@@ -384,7 +396,11 @@ class SoundManager {
     let currentProgIndex = 0;
 
     this.musicInterval = setInterval(() => {
-      if (this.isMuted || !this.ctx || this.ctx.state === 'suspended') return;
+      if (this.isMuted || !this.ctx) return;
+      
+      // Auto resume context if browser suspended it during idle
+      this.resumeContext();
+      if (this.ctx.state === 'suspended') return;
 
       const currentTime = this.ctx.currentTime;
       this.musicStep++;
@@ -395,7 +411,7 @@ class SoundManager {
 
       const currentProg = progressions[currentProgIndex];
 
-      // Deep sub bass step on beat
+      // Deep sub bass step on beat - Boosted volume
       if (this.musicStep % 4 === 0) {
         const bassOsc = this.ctx.createOscillator();
         const bassGain = this.ctx.createGain();
@@ -407,7 +423,7 @@ class SoundManager {
         bassFilter.type = 'lowpass';
         bassFilter.frequency.setValueAtTime(120, currentTime);
 
-        bassGain.gain.setValueAtTime(0.08, currentTime);
+        bassGain.gain.setValueAtTime(0.25, currentTime); // Enhanced sub power
         bassGain.gain.exponentialRampToValueAtTime(0.001, currentTime + 0.6);
 
         bassOsc.connect(bassFilter);
@@ -418,7 +434,7 @@ class SoundManager {
         bassOsc.stop(currentTime + 0.6);
       }
 
-      // Arpeggiated synthesizer line
+      // Arpeggiated synthesizer line - Boosted volume
       const stepModulo = this.musicStep % 8;
       if (stepModulo === 0 || stepModulo === 2 || stepModulo === 4 || stepModulo === 6 || Math.random() < 0.25) {
         const osc = this.ctx.createOscillator();
@@ -434,7 +450,7 @@ class SoundManager {
         filter.type = 'lowpass';
         filter.frequency.setValueAtTime(600, currentTime);
 
-        gain.gain.setValueAtTime(0.02, currentTime);
+        gain.gain.setValueAtTime(0.08, currentTime); // Clearer synth lead
         gain.gain.exponentialRampToValueAtTime(0.001, currentTime + 0.35);
 
         osc.connect(filter);
@@ -445,7 +461,7 @@ class SoundManager {
         osc.stop(currentTime + 0.35);
       }
 
-      // Tactical hi-hat/percussive click
+      // Tactical hi-hat/percussive click - Boosted volume
       if (this.musicStep % 2 === 1 && Math.random() < 0.6) {
         const hhBuffer = this.ctx.createBuffer(1, this.ctx.sampleRate * 0.015, this.ctx.sampleRate);
         const hhData = hhBuffer.getChannelData(0);
@@ -461,7 +477,7 @@ class SoundManager {
         hhFilter.frequency.setValueAtTime(7500, currentTime);
 
         const hhGain = this.ctx.createGain();
-        hhGain.gain.setValueAtTime(0.003, currentTime);
+        hhGain.gain.setValueAtTime(0.015, currentTime); // Distinct, crisp hi-hat tick
         hhGain.gain.exponentialRampToValueAtTime(0.0001, currentTime + 0.015);
 
         hhSource.connect(hhFilter);
@@ -474,25 +490,27 @@ class SoundManager {
   }
 
   playLaunch() {
+    this.resumeContext();
     if (!this.ctx || !this.masterGain || this.isMuted) return;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     
     osc.type = 'square';
     osc.frequency.setValueAtTime(150, this.ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.2);
+    osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.25);
     
-    gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
+    gain.gain.setValueAtTime(0.38, this.ctx.currentTime); // Highly audible launching swoosh
+    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.25);
     
     osc.connect(gain);
     gain.connect(this.masterGain);
     
     osc.start();
-    osc.stop(this.ctx.currentTime + 0.2);
+    osc.stop(this.ctx.currentTime + 0.25);
   }
 
   playHit(isHeavy: boolean = false) {
+    this.resumeContext();
     if (!this.ctx || !this.masterGain || this.isMuted) return;
     const bufferSize = this.ctx.sampleRate * 0.5;
     const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
@@ -511,7 +529,7 @@ class SoundManager {
     filter.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.5);
 
     const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(isHeavy ? 0.5 : 0.2, this.ctx.currentTime);
+    gain.gain.setValueAtTime(isHeavy ? 0.95 : 0.55, this.ctx.currentTime); // Massive responsive explosion feedback
     gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.5);
 
     noise.connect(filter);
@@ -522,6 +540,7 @@ class SoundManager {
   }
 
   playRadar() {
+    this.resumeContext();
     if (!this.ctx || !this.masterGain || this.isMuted) return;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
@@ -529,7 +548,7 @@ class SoundManager {
     osc.type = 'sine';
     osc.frequency.setValueAtTime(880, this.ctx.currentTime);
     
-    gain.gain.setValueAtTime(0.05, this.ctx.currentTime);
+    gain.gain.setValueAtTime(0.28, this.ctx.currentTime); // Direct tactical radar lock feedback
     gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
 
     osc.connect(gain);
@@ -540,6 +559,7 @@ class SoundManager {
   }
 
   playJetFlyby(x: number) {
+    this.resumeContext();
     if (!this.ctx || !this.masterGain || this.isMuted) return;
     // Pan based on x position
     const pan = (x / CANVAS_WIDTH) * 2 - 1;
@@ -558,7 +578,7 @@ class SoundManager {
     filter.Q.value = 1;
 
     gain.gain.setValueAtTime(0, this.ctx.currentTime);
-    gain.gain.linearRampToValueAtTime(0.05, this.ctx.currentTime + 0.5);
+    gain.gain.linearRampToValueAtTime(0.25, this.ctx.currentTime + 0.5); // Clear cinematic jet flyby
     gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 1.0);
 
     osc.connect(filter);
