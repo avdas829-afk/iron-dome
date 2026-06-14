@@ -6,14 +6,11 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  Shield, 
-  Target, 
+  AlertTriangle, 
+  RotateCcw,
   Volume2,
   VolumeX,
-  AlertTriangle, 
-  Activity,
-  Crosshair,
-  RotateCcw
+  RefreshCw
 } from 'lucide-react';
 
 // --- Types ---
@@ -31,16 +28,56 @@ interface GameState {
   missilesIntercepted: number;
 }
 
+interface MapMarker {
+  x: number;
+  y: number;
+  label: string;
+  type: 'church' | 'mall' | 'mosque' | 'ruins' | 'market' | 'hospital' | 'hotel' | 'generic';
+}
+
+interface MapRoad {
+  type: 'major' | 'minor';
+  points: Point[];
+  name?: string;
+  trafficIntensity?: 'low' | 'medium' | 'high';
+}
+
+interface MapBuilding {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+  roofDetail: 'H' | 'cross' | 'solar' | 'hatch' | 'none';
+  label?: string;
+  isHighValue?: boolean;
+  hasPool?: boolean;
+  poolX?: number;
+  poolY?: number;
+  poolW?: number;
+  poolH?: number;
+  carColor?: string;
+  rotation?: number;
+}
+
+interface MapGreenZone {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  type: 'park' | 'water' | 'farmland_crops' | 'farmland_plowed' | 'desert_sand';
+}
+
 // --- Dynamic Dimensions (Responsive to Portables and Display Aspect Ratios) ---
 
 let CANVAS_WIDTH = 380;
 let CANVAS_HEIGHT = 600;
-const GROUND_HEIGHT = 40;
+const GROUND_HEIGHT = 10;
 let BATTERY_X = CANVAS_WIDTH * 0.5;
 let BATTERY_Y = CANVAS_HEIGHT - GROUND_HEIGHT;
 const INTERCEPTOR_SPEED = 3.2;
-const ENEMY_SPEED_MIN = 0.21;
-const ENEMY_SPEED_MAX = 0.6125;
+const ENEMY_SPEED_MIN = 1.0;
+const ENEMY_SPEED_MAX = 2.0;
 const EXPLOSION_MAX_RADIUS = 35;
 const AUTO_FIRE_COOLDOWN = 450; // ms
 const MAX_CONCURRENT_ENEMIES = 5;
@@ -49,6 +86,229 @@ const JET_RADAR_RANGE = 100;
 const JET_FIRE_COOLDOWN = 1000;
 const JET_ALTITUDE = 100;
 const JET_SPEED = 1.5;
+
+// --- Procedural Map Generator ---
+
+function generateProceduralMap(width: number, height: number) {
+  const greenZones: MapGreenZone[] = [];
+  const _roads: MapRoad[] = [];
+  const buildings: MapBuilding[] = [];
+  const markers: MapMarker[] = [];
+
+  // Helper inside to make Bezier
+  const makeBezierCurve = (start: Point, ctrl1: Point, ctrl2: Point, end: Point, steps = 16): Point[] => {
+    const pts: Point[] = [];
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const mt = 1 - t;
+      const x = mt * mt * mt * start.x + 3 * mt * mt * t * ctrl1.x + 3 * mt * t * t * ctrl2.x + t * t * t * end.x;
+      const y = mt * mt * mt * start.y + 3 * mt * mt * t * ctrl1.y + 3 * mt * t * t * ctrl2.y + t * t * t * end.y;
+      pts.push({ x, y });
+    }
+    return pts;
+  };
+
+  // 1. Random Green Zones: count 5 to 7
+  const gzTypes: Array<'park' | 'farmland_crops' | 'farmland_plowed' | 'desert_sand'> = ['park', 'farmland_crops', 'farmland_plowed', 'desert_sand'];
+  const numZones = 5 + Math.floor(Math.random() * 3); 
+  for (let i = 0; i < numZones; i++) {
+    const type = gzTypes[Math.floor(Math.random() * gzTypes.length)];
+    const gzW = 120 + Math.floor(Math.random() * 140);
+    const gzH = 90 + Math.floor(Math.random() * 100);
+    const gzX = Math.random() * (width - 120);
+    const gzY = Math.random() * (height - 90);
+    greenZones.push({ x: gzX, y: gzY, w: gzW, h: gzH, type });
+  }
+
+  // 2. Random curvy & winding roads
+  const roadNamesPool = [
+    "Olive Valley St", "Star Street", "Shepherds Rd", "Old City Walk",
+    "Valley View Lane", "Winding Ridge", "Crestview Dr", "West Hill Pass",
+    "Highland Path", "Crest Ridge Lane", "Sunset Way", "Breeze Boulevard",
+    "Whispering Palms Road", "Citadel Bypass", "Grand Souk Alley", "Edom Pass",
+    "Echo Gorge Rd", "Pine Ridge Trail", "Desert Oasis Way", "Ancient Gate St"
+  ];
+  const shuffledNames = [...roadNamesPool].sort(() => Math.random() - 0.5);
+  
+  const roadConfigs = [
+    {
+      start: { x: -40, y: height * (0.1 + Math.random() * 0.15) },
+      ctrl1: { x: width * (0.1 + Math.random() * 0.1), y: height * (0.2 + Math.random() * 0.15) },
+      ctrl2: { x: width * (0.2 + Math.random() * 0.15), y: height * (0.4 + Math.random() * 0.15) },
+      end: { x: width * (0.45 + Math.random() * 0.15), y: height * (0.4 + Math.random() * 0.1) }
+    },
+    {
+      start: { x: width * (0.42 + Math.random() * 0.1), y: height * (0.38 + Math.random() * 0.1) },
+      ctrl1: { x: width * (0.65 + Math.random() * 0.15), y: height * (0.35 + Math.random() * 0.1) },
+      ctrl2: { x: width * (0.7 + Math.random() * 0.15), y: height * (0.6 + Math.random() * 0.15) },
+      end: { x: width + 40, y: height * (0.65 + Math.random() * 0.15) }
+    },
+    {
+      start: { x: width * (0.2 + Math.random() * 0.2), y: height * (0.5 + Math.random() * 0.15) },
+      ctrl1: { x: width * (0.45 + Math.random() * 0.15), y: height * (0.55 + Math.random() * 0.1) },
+      ctrl2: { x: width * (0.5 + Math.random() * 0.2), y: height * (0.75 + Math.random() * 0.15) },
+      end: { x: width * (0.6 + Math.random() * 0.25), y: height * (0.8 + Math.random() * 0.1) }
+    },
+    {
+      start: { x: width * (0.05 + Math.random() * 0.1), y: -30 },
+      ctrl1: { x: width * (0.2 + Math.random() * 0.1), y: height * (0.08 + Math.random() * 0.08) },
+      ctrl2: { x: width * (0.7 + Math.random() * 0.1), y: height * (0.05 + Math.random() * 0.08) },
+      end: { x: width * (0.85 + Math.random() * 0.1), y: -30 }
+    }
+  ];
+
+  roadConfigs.forEach((config, idx) => {
+    _roads.push({
+      type: idx < 2 ? 'major' : 'minor',
+      name: shuffledNames[idx % shuffledNames.length],
+      trafficIntensity: idx % 2 === 0 ? 'medium' : 'low',
+      points: makeBezierCurve(config.start, config.ctrl1, config.ctrl2, config.end)
+    });
+  });
+
+  // 3. Dense clusters of stone houses
+  const generateDenseCluster = (centerX: number, centerY: number, rx: number, ry: number, count: number, baseRot = 0) => {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = Math.sqrt(Math.random()); 
+      const bx = centerX + Math.cos(angle) * dist * rx;
+      const by = centerY + Math.sin(angle) * dist * ry;
+
+      if (by < 20 || by > height - 40 || bx < 10 || bx > width - 10) continue;
+
+      const w = 9 + Math.floor(Math.random() * 8);
+      const h = 8 + Math.floor(Math.random() * 8);
+
+      const colorSeeds = [
+        '#eae4d9', 
+        '#dfd6c4', 
+        '#cca590', 
+        '#e5decf', 
+        '#bebcb0', 
+        '#bc8c72', 
+        '#dcd4c5', 
+        '#b5af9f'  
+      ];
+      const color = colorSeeds[Math.floor(Math.random() * colorSeeds.length)];
+      const isHighValue = i % 18 === 0;
+
+      const roofStyles: Array<'none' | 'cross' | 'solar' | 'hatch'> = ['none', 'cross', 'solar', 'hatch'];
+      const roofDetail = roofStyles[i % roofStyles.length];
+
+      const hasPool = !isHighValue && (i % 25 === 1);
+      let poolX, poolY, poolW, poolH;
+      if (hasPool) {
+        poolW = 4 + (i % 3);
+        poolH = 3 + (i % 2);
+        poolX = bx + 1;
+        poolY = by + h + 1;
+      }
+
+      const carColors = ['#f8fafc', '#dc2626', '#2563eb', '#ca8a04', '#475569'];
+      const carColor = i % 10 === 0 ? carColors[i % carColors.length] : undefined;
+      
+      const rotation = baseRot + (Math.random() * 0.25 - 0.125);
+
+      buildings.push({
+        x: bx,
+        y: by,
+        w,
+        h,
+        color,
+        roofDetail: isHighValue ? 'H' : roofDetail,
+        isHighValue,
+        hasPool,
+        poolX,
+        poolY,
+        poolW,
+        poolH,
+        carColor,
+        rotation
+      });
+    }
+  };
+
+  const numClusters = 4 + Math.floor(Math.random() * 3); 
+  for (let c = 0; c < numClusters; c++) {
+    const thetaIdx = c / numClusters;
+    const regionX = width * (0.15 + 0.7 * (c % 2 === 0 ? 0.2 + 0.6 * Math.random() : 0.8 * Math.random()));
+    const regionY = height * (0.12 + 0.68 * thetaIdx + 0.1 * Math.random());
+    const rx = width * (0.12 + Math.random() * 0.12);
+    const ry = height * (0.08 + Math.random() * 0.08);
+    const density = 45 + Math.floor(Math.random() * 30); 
+    const randomRotAngle = (Math.random() * 0.4 - 0.2) * Math.PI;
+    generateDenseCluster(regionX, regionY, rx, ry, density, randomRotAngle);
+  }
+
+  // 4. Random Satellite Landmarks & Pins
+  const sampleLandmarks = {
+    church: [
+      'St. Helena Basilica', 'Hermitage of Peace', 'Sovereign Abbey', 
+      'Monastery of the Cross', 'Byzantine Sepulchre', 'Church of the Hills'
+    ],
+    mosque: [
+      'Grand Dome Omar', 'Al-Amin Minaret', 'Peace Arch Masjid', 
+      'Old Quarter Sanctuary', 'Khattab Pilgrim Mosque'
+    ],
+    ruins: [
+      'Roman Columns Forum', 'Citadel Stone Ruins', 'Crusader Bastion Lookout',
+      'Byzantine Vineyard Arch', 'Aqueduct Remains'
+    ],
+    market: [
+      'Nomadic Craft Souk', 'Quarter Spice Marketplace', 'Bazaar Al-Jadeed',
+      'Central Plaza Emporium', 'Grand Carpet Exchange'
+    ],
+    mall: [
+      'Zion Heights Plaza', 'Terrace View Galleria', 'Dunes Retail Center',
+      'Caronte Commerce District', 'Grand Oasis Atrium'
+    ],
+    hospital: [
+      'St. Jude Trauma Clinic', 'Crescent Medical Base', 'Red Shield Base'
+    ],
+    hotel: [
+      'Highland Summit Resort', 'Olive Ridge Inn', 'Golden Sands Lodge'
+    ]
+  };
+
+  const selectedMarkerTypes = ['church', 'mosque', 'ruins', 'market', 'mall', 'hospital', 'hotel'];
+  const shuffledTypes = [...selectedMarkerTypes].sort(() => Math.random() - 0.5);
+
+  const activeMarkersCount = 3 + Math.floor(Math.random() * 3); 
+  const minimumMarkerDistance = 110;
+  
+  for (let m = 0; m < activeMarkersCount; m++) {
+    const mType = shuffledTypes[m % shuffledTypes.length] as 'church' | 'mosque' | 'ruins' | 'market' | 'mall' | 'hospital' | 'hotel';
+    const namesList = sampleLandmarks[mType];
+    const pinName = namesList[Math.floor(Math.random() * namesList.length)];
+    
+    let attempts = 0;
+    let rx = 0, ry = 0;
+    let coordsValid = false;
+    
+    while (!coordsValid && attempts < 15) {
+      rx = width * (0.15 + Math.random() * 0.7);
+      ry = height * (0.16 + Math.random() * 0.65);
+      
+      coordsValid = true;
+      for (const existing of markers) {
+        if (Math.hypot(existing.x - rx, existing.y - ry) < minimumMarkerDistance) {
+          coordsValid = false;
+          break;
+        }
+      }
+      attempts++;
+    }
+    
+    markers.push({
+      x: rx,
+      y: ry,
+      label: pinName,
+      type: mType
+    });
+  }
+
+  return { greenZones, roads: _roads, buildings, markers };
+}
 
 // --- Sound Manager ---
 
@@ -627,6 +887,12 @@ class FighterJet {
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [dimensions, setDimensions] = useState({ width: 380, height: 600 });
+  const mapDataRef = useRef<{
+    roads: MapRoad[];
+    buildings: MapBuilding[];
+    greenZones: MapGreenZone[];
+    markers: MapMarker[];
+  }>({ roads: [], buildings: [], greenZones: [], markers: [] });
 
   useEffect(() => {
     const handleResize = () => {
@@ -634,7 +900,6 @@ export default function App() {
       const h = window.innerHeight || 600;
       const aspect = w / h;
       
-      // Keep a stable vertical height (e.g. 600) for standard drop speed of missiles
       const height = 600;
       const width = Math.round(height * aspect);
       
@@ -643,6 +908,8 @@ export default function App() {
       BATTERY_X = width * 0.5;
       BATTERY_Y = height - GROUND_HEIGHT;
       
+      const { greenZones, roads, buildings, markers } = generateProceduralMap(width, height);
+      mapDataRef.current = { greenZones, roads, buildings, markers };
       setDimensions({ width, height });
     };
 
@@ -663,7 +930,7 @@ export default function App() {
   });
   
   const [shake, setShake] = useState(0);
-  const [isMuted, setIsMuted] = useState(true);
+  const [isMuted, setIsMuted] = useState(false);
   const gameLoopRef = useRef<number>(null);
   const enemiesRef = useRef<Missile[]>([]);
   const interceptorsRef = useRef<Missile[]>([]);
@@ -778,41 +1045,395 @@ export default function App() {
 
     frameCountRef.current++;
 
-    // Clear canvas
-    ctx.fillStyle = '#020617'; // slate-950
+    // Clear canvas with beautiful warm satellite desert dirt loam tone
+    ctx.fillStyle = '#cac1ab'; // Sun-baked loam beige
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-    // Draw Grid
-    ctx.strokeStyle = 'rgba(30, 41, 59, 0.5)'; // slate-800
+    // --- DRAW DETAILED TOP-DOWN SATELLITE MAP BACKGROUND ---
+    const map = mapDataRef.current || { greenZones: [], roads: [], buildings: [], markers: [] };
+
+    // Velocity sliding offset based on simulation frames
+    const scrollSpeed = 0.95;
+    const scrollHeight = 600;
+    const scrollOffset = (frameCountRef.current * scrollSpeed) % scrollHeight; 
+
+    // Helper to draw the unified battlefield coordinate system at a specific scrolling Y offset
+    const drawBattlefieldLayer = (offsetY: number) => {
+      // 1. Draw Green Terraces, Hill Orchards, Farmland & Crops
+      map.greenZones.forEach(gz => {
+        const gzYScrolled = gz.y + offsetY;
+        
+        // Skip drawing if outside vertical viewport boundaries (with cushion)
+        if (gzYScrolled + gz.h < -40 || gzYScrolled > BATTERY_Y + 120) return;
+
+        if (gz.type === 'park') {
+          // Olive grove orchards (typical of landscape)
+          ctx.fillStyle = '#617c58'; 
+          ctx.fillRect(gz.x, gzYScrolled, gz.w, gz.h);
+          
+          // Draw individual olive trees as small clustered rings
+          ctx.fillStyle = '#395332';
+          for (let tx = gz.x + 6; tx < gz.x + gz.w - 4; tx += 10) {
+            const shift = (tx * 7) % 5;
+            for (let ty = gzYScrolled + 6; ty < gzYScrolled + gz.h - 4; ty += 10) {
+              ctx.beginPath();
+              ctx.arc(tx + shift, ty + (shift % 3), 3, 0, Math.PI * 2);
+              ctx.fill();
+              
+              // Highlight of tree foliage top
+              ctx.fillStyle = '#4c6a44';
+              ctx.beginPath();
+              ctx.arc(tx + shift - 0.8, ty + (shift % 3) - 0.8, 1.2, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.fillStyle = '#395332';
+            }
+          }
+        } else if (gz.type === 'farmland_crops') {
+          // Cultivated agriculture plots (crop channels)
+          ctx.fillStyle = '#7a916a'; 
+          ctx.fillRect(gz.x, gzYScrolled, gz.w, gz.h);
+          
+          ctx.strokeStyle = '#5a734a';
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          for (let rx = gz.x + 4; rx < gz.x + gz.w; rx += 8) {
+            ctx.moveTo(rx, gzYScrolled);
+            ctx.lineTo(rx, gzYScrolled + gz.h);
+          }
+          ctx.stroke();
+        } else if (gz.type === 'farmland_plowed') {
+          // Terraced brown plow lines
+          ctx.fillStyle = '#ab9382'; 
+          ctx.fillRect(gz.x, gzYScrolled, gz.w, gz.h);
+
+          ctx.strokeStyle = '#856f5f';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          for (let ox = -gz.h; ox < gz.w; ox += 9) {
+            ctx.moveTo(Math.max(gz.x, gz.x + ox), Math.max(gzYScrolled, gzYScrolled - ox));
+            ctx.lineTo(Math.min(gz.x + gz.w, gz.x + gz.w + ox), Math.min(gzYScrolled + gz.h, gzYScrolled + gz.h - ox));
+          }
+          ctx.stroke();
+        } else if (gz.type === 'desert_sand') {
+          // Brighter sandy areas
+          ctx.fillStyle = '#d9cea9';
+          ctx.fillRect(gz.x, gzYScrolled, gz.w, gz.h);
+          
+          // Soft dune ripples
+          ctx.strokeStyle = 'rgba(164, 150, 110, 0.3)';
+          ctx.lineWidth = 2.0;
+          ctx.beginPath();
+          for (let dy = gzYScrolled + 10; dy < gzYScrolled + gz.h; dy += 16) {
+            ctx.moveTo(gz.x, dy);
+            ctx.bezierCurveTo(gz.x + gz.w * 0.3, dy - 6, gz.x + gz.w * 0.6, dy + 6, gz.x + gz.w, dy);
+          }
+          ctx.stroke();
+        }
+      });
+
+      // 2. Draw GPS Styled Organic Curved Roads with Labeling
+      map.roads.forEach(road => {
+        if (road.points.length < 2) return;
+
+        // Draw road casing (dark outline)
+        ctx.beginPath();
+        let pt0 = road.points[0];
+        ctx.moveTo(pt0.x, pt0.y + offsetY);
+        for (let i = 1; i < road.points.length; i++) {
+          ctx.lineTo(road.points[i].x, road.points[i].y + offsetY);
+        }
+        ctx.strokeStyle = road.type === 'major' ? 'rgba(50, 52, 58, 0.45)' : 'rgba(75, 78, 85, 0.4)';
+        ctx.lineWidth = road.type === 'major' ? 8 : 5;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+
+        // Draw inner road surface (concrete / asphalt grey)
+        ctx.beginPath();
+        ctx.moveTo(pt0.x, pt0.y + offsetY);
+        for (let i = 1; i < road.points.length; i++) {
+          ctx.lineTo(road.points[i].x, road.points[i].y + offsetY);
+        }
+        ctx.strokeStyle = road.type === 'major' ? '#bec4cc' : '#dcdde0';
+        ctx.lineWidth = road.type === 'major' ? 5 : 3.2;
+        ctx.stroke();
+
+        // Traffic flow indicator overlay
+        if (road.type === 'major' && road.trafficIntensity) {
+          let trafficColor = '#22c55e'; // Green flow
+          if (road.trafficIntensity === 'high') {
+            trafficColor = '#ef4444'; // Red standstill
+          } else if (road.trafficIntensity === 'medium') {
+            trafficColor = '#f59e0b'; // Amber
+          }
+          ctx.beginPath();
+          ctx.moveTo(pt0.x, pt0.y + offsetY);
+          for (let i = 1; i < road.points.length; i++) {
+            ctx.lineTo(road.points[i].x, road.points[i].y + offsetY);
+          }
+          ctx.strokeStyle = trafficColor;
+          ctx.lineWidth = 1.0;
+          ctx.stroke();
+        }
+
+        // Curved or angled road labels
+        if (road.name) {
+          const midIdx = Math.floor(road.points.length / 2);
+          const p1 = road.points[midIdx];
+          const p2 = road.points[Math.min(road.points.length - 1, midIdx + 1)];
+          const scrY = p1.y + offsetY;
+          
+          if (scrY > 40 && scrY < BATTERY_Y - 40) {
+            ctx.save();
+            ctx.translate(p1.x, scrY);
+            
+            let angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+            if (angle > Math.PI / 2 || angle < -Math.PI / 2) {
+              angle += Math.PI;
+            }
+            ctx.rotate(angle);
+            
+            ctx.fillStyle = '#2d333f'; 
+            ctx.font = 'bold 7.5px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            
+            // White backing halo
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+            ctx.lineWidth = 2.0;
+            ctx.strokeText(road.name, 0, -6);
+            ctx.fillText(road.name, 0, -6);
+            ctx.restore();
+          }
+        }
+      });
+
+      // 3. Draw Densely Packed Stone Buildings with 3D shadows & rotations
+      map.buildings.forEach(b => {
+        const bYScrolled = b.y + offsetY;
+
+        // Skip drawing if outside bounds
+        if (bYScrolled + b.h < -40 || bYScrolled > BATTERY_Y + 120) return;
+
+        ctx.save();
+        ctx.translate(b.x + b.w / 2, bYScrolled + b.h / 2);
+        ctx.rotate(b.rotation || 0);
+
+        const halfW = b.w / 2;
+        const halfH = b.h / 2;
+
+        // Sun shadow (diagonal afternoon sun)
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.28)'; 
+        ctx.fillRect(-halfW + 1.8, -halfH + 2.2, b.w, b.h);
+
+        // Swimming Pool structures (nested)
+        if (b.hasPool && b.poolX && b.poolY) {
+          ctx.fillStyle = '#4a5568';
+          ctx.fillRect(halfW + 0.8, -halfH, 5, 7);
+          ctx.fillStyle = '#06b6d4'; 
+          ctx.fillRect(halfW + 1.3, -halfH + 0.8, 3, 5.4);
+        }
+
+        // Building Body
+        ctx.fillStyle = b.color;
+        ctx.fillRect(-halfW, -halfH, b.w, b.h);
+
+        // Sunlit border highlight edge
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(-halfW, -halfH, b.w, b.h);
+
+        // Rooftop Details
+        if (b.roofDetail === 'H' || b.isHighValue) {
+          ctx.strokeStyle = b.isHighValue ? '#34d399' : 'rgba(100, 116, 139, 0.4)';
+          ctx.lineWidth = 0.8;
+          ctx.beginPath();
+          ctx.arc(0, 0, Math.min(b.w, b.h) * 0.35, 0, Math.PI * 2);
+          ctx.stroke();
+
+          ctx.fillStyle = b.isHighValue ? '#34d399' : 'rgba(100, 116, 139, 0.6)';
+          ctx.font = 'bold 6px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('H', 0, 0);
+        } else if (b.roofDetail === 'solar') {
+          ctx.fillStyle = 'rgba(30, 58, 138, 0.75)';
+          ctx.fillRect(-halfW + 1.2, -halfH + 1.2, b.w - 2.4, b.h - 2.4);
+        } else if (b.roofDetail === 'cross') {
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.28)';
+          ctx.fillRect(-halfW + 2, -halfH + 2, b.w - 4, b.h - 4);
+        }
+
+        // Parked car vehicle
+        if (b.carColor) {
+          ctx.fillStyle = b.carColor;
+          ctx.fillRect(halfW + 1, halfH - 4.5, 2.2, 3.8);
+        }
+
+        ctx.restore();
+      });
+
+      // 4. Draw Location Marker Pins
+      if (map.markers) {
+        map.markers.forEach(mk => {
+          const scrY = mk.y + offsetY;
+          if (scrY < 30 || scrY > BATTERY_Y - 20) return;
+
+          ctx.save();
+          
+          const badgeRadius = 10;
+          
+          // Badge shadow
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+          ctx.shadowBlur = 5;
+          ctx.shadowOffsetX = 1;
+          ctx.shadowOffsetY = 2;
+          
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(mk.x, scrY, badgeRadius, 0, Math.PI * 2);
+          ctx.fill();
+          
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 0;
+
+          ctx.strokeStyle = '#b0b5be';
+          ctx.lineWidth = 0.5;
+          ctx.stroke();
+
+          // Inner circle and emoji matching types
+          let pinColor = '#1e3a8a';
+          let emoji = '📍';
+          if (mk.type === 'church') {
+            pinColor = '#a77a56';
+            emoji = '⛪';
+          } else if (mk.type === 'mall') {
+            pinColor = '#1d4ed8';
+            emoji = '🛍️';
+          } else if (mk.type === 'mosque') {
+            pinColor = '#15803d';
+            emoji = '🕌';
+          } else if (mk.type === 'ruins') {
+            pinColor = '#475569';
+            emoji = '🏰';
+          } else if (mk.type === 'market') {
+            pinColor = '#b45309';
+            emoji = '🎪';
+          } else if (mk.type === 'hospital') {
+            pinColor = '#be123c';
+            emoji = '🏥';
+          } else if (mk.type === 'hotel') {
+            pinColor = '#6d28d9';
+            emoji = '🏨';
+          }
+
+          ctx.fillStyle = pinColor;
+          ctx.beginPath();
+          ctx.arc(mk.x, scrY, badgeRadius * 0.72, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '8px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(emoji, mk.x, scrY);
+
+          // Text Badge
+          ctx.font = 'bold 9px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'top';
+
+          // Outer dark silhouette stroke
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 2.5;
+          ctx.strokeText(mk.label, mk.x, scrY + badgeRadius + 3);
+
+          // White fill
+          ctx.fillStyle = '#ffffff';
+          ctx.fillText(mk.label, mk.x, scrY + badgeRadius + 3);
+
+          ctx.restore();
+        });
+      }
+    };
+
+    // Render continuous dual passes for mathematically cohesive seamless wrapping layout
+    drawBattlefieldLayer(scrollOffset);
+    drawBattlefieldLayer(scrollOffset - scrollHeight);
+
+    // 4. Drawing high-tech overlay details (Radar alignment markings & telemetry markers)
+    ctx.strokeStyle = 'rgba(30, 41, 59, 0.22)';
     ctx.lineWidth = 1;
-    for (let x = 0; x < CANVAS_WIDTH; x += 50) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, CANVAS_HEIGHT);
-      ctx.stroke();
-    }
-    for (let y = 0; y < CANVAS_HEIGHT; y += 50) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(CANVAS_WIDTH, y);
-      ctx.stroke();
+    // Map overlay grid intersections markers
+    for (let x = 100; x < CANVAS_WIDTH; x += 100) {
+      for (let y = 100; y < CANVAS_HEIGHT; y += 100) {
+        ctx.beginPath();
+        ctx.moveTo(x - 5, y); ctx.lineTo(x + 5, y);
+        ctx.moveTo(x, y - 5); ctx.lineTo(x, y + 5);
+        ctx.stroke();
+      }
     }
 
-    // Draw Ground
-    ctx.fillStyle = '#0f172a'; // slate-900
+    // Modern tracking coordinate labels on screen edges
+    ctx.fillStyle = 'rgba(148, 163, 184, 0.25)';
+    ctx.font = '7px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('SYS LOC: 32°04\'N 34°47\'E', 12, 16);
+    ctx.fillText('IRON DOME GRID SENSOR-4', CANVAS_WIDTH - 125, 16);
+
+    // 5. Basestation/Battery Base Ground Plate (Sealing the very bottom cleanly)
+    ctx.fillStyle = '#090d16'; // Deep space slate backboard
     ctx.fillRect(0, BATTERY_Y, CANVAS_WIDTH, GROUND_HEIGHT);
-    ctx.strokeStyle = '#1e293b'; // slate-800
-    ctx.lineWidth = 2;
-    ctx.strokeRect(0, BATTERY_Y, CANVAS_WIDTH, GROUND_HEIGHT);
+    ctx.strokeStyle = '#1e293b'; // slate-800 separator
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, BATTERY_Y);
+    ctx.lineTo(CANVAS_WIDTH, BATTERY_Y);
+    ctx.stroke();
 
-    // Draw Battery
+    // Draw Battery (Tactical Armored Command Launcher Station - occupying space beautifully)
+    // Outer heavy armored blast casing
+    ctx.fillStyle = '#064e3b'; // dark forest emerald-900
+    ctx.beginPath();
+    ctx.moveTo(BATTERY_X - 45, BATTERY_Y);
+    ctx.lineTo(BATTERY_X + 45, BATTERY_Y);
+    ctx.lineTo(BATTERY_X + 30, BATTERY_Y - 22);
+    ctx.lineTo(BATTERY_X - 30, BATTERY_Y - 22);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#10b981'; // emerald-500
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Inner heavy battery core launcher pod
     ctx.fillStyle = '#10b981'; // emerald-500
     ctx.beginPath();
-    ctx.moveTo(BATTERY_X - 20, BATTERY_Y);
-    ctx.lineTo(BATTERY_X + 20, BATTERY_Y);
-    ctx.lineTo(BATTERY_X + 10, BATTERY_Y - 15);
-    ctx.lineTo(BATTERY_X - 10, BATTERY_Y - 15);
+    ctx.moveTo(BATTERY_X - 22, BATTERY_Y);
+    ctx.lineTo(BATTERY_X + 22, BATTERY_Y);
+    ctx.lineTo(BATTERY_X + 12, BATTERY_Y - 32);
+    ctx.lineTo(BATTERY_X - 12, BATTERY_Y - 32);
     ctx.closePath();
+    ctx.fill();
+
+    // Silo / Launcher Tubes Detail (high-tech vertical chambers)
+    ctx.strokeStyle = '#022c22'; // deep emerald-950 shadows
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    // Vertical launcher cell divisions
+    ctx.moveTo(BATTERY_X - 8, BATTERY_Y - 14);
+    ctx.lineTo(BATTERY_X - 8, BATTERY_Y - 28);
+    ctx.moveTo(BATTERY_X, BATTERY_Y - 14);
+    ctx.lineTo(BATTERY_X, BATTERY_Y - 30);
+    ctx.moveTo(BATTERY_X + 8, BATTERY_Y - 14);
+    ctx.lineTo(BATTERY_X + 8, BATTERY_Y - 28);
+    ctx.stroke();
+
+    // High intensity active system status indicator glow
+    ctx.fillStyle = '#34d399'; // bright core green
+    ctx.beginPath();
+    ctx.arc(BATTERY_X, BATTERY_Y - 8, 3.5, 0, Math.PI * 2);
     ctx.fill();
 
     spawnEnemy();
@@ -1006,10 +1627,83 @@ export default function App() {
     interceptorsRef.current = [];
     explosionsRef.current = [];
     frameCountRef.current = 0;
+
+    // Procedurally regenerate background on game restart
+    const { greenZones, roads, buildings, markers } = generateProceduralMap(CANVAS_WIDTH, CANVAS_HEIGHT);
+    mapDataRef.current = { greenZones, roads, buildings, markers };
   };
 
   return (
     <div className="w-screen h-[100dvh] bg-slate-950 text-slate-200 font-mono overflow-hidden relative select-none">
+      {/* Tactical Header HUD */}
+      <div className="fixed top-3 left-3 right-3 z-10 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 pointer-events-none select-none">
+        {/* Left Stats Section */}
+        <div className="flex flex-wrap items-center gap-3 pointer-events-auto">
+          {/* Health Bar Grid */}
+          <div className="bg-slate-950/85 backdrop-blur-md px-3 py-2 rounded border border-slate-800 flex items-center gap-3">
+            <div className="flex flex-col">
+              <span className="text-[9px] text-slate-400 uppercase tracking-wider font-semibold">Base Health</span>
+              <div className="flex items-center gap-2 mt-0.5">
+                <div className="w-24 h-2.5 bg-slate-800 rounded-sm overflow-hidden border border-slate-700/50 relative">
+                  <motion.div 
+                    initial={{ width: "100%" }}
+                    animate={{ width: `${gameState.health}%` }}
+                    transition={{ duration: 0.3 }}
+                    className={`h-full ${gameState.health > 40 ? 'bg-emerald-500' : 'bg-red-500'}`}
+                  />
+                </div>
+                <span className={`text-xs font-bold ${gameState.health > 40 ? 'text-emerald-400' : 'text-red-400'}`}>{gameState.health}%</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-slate-950/85 backdrop-blur-md px-3 py-2 rounded border border-slate-800 flex items-center gap-4">
+            <div className="flex flex-col">
+              <span className="text-[9px] text-slate-400 uppercase tracking-wider font-semibold">Level</span>
+              <span className="text-sm font-bold text-cyan-400 mt-0.5">0{gameState.level}</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-[9px] text-slate-400 uppercase tracking-wider font-semibold">Intercepts</span>
+              <span className="text-sm font-bold text-white mt-0.5">{gameState.missilesIntercepted}</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-[9px] text-slate-400 uppercase tracking-wider font-semibold">Active Threats</span>
+              <span className="text-sm font-bold text-red-400 mt-0.5">{enemiesRef.current.length}</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-[9px] text-slate-400 uppercase tracking-wider font-semibold">T-Score</span>
+              <span className="text-sm font-bold text-emerald-400 mt-0.5">{gameState.score}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Controls Panel */}
+        <div className="flex items-center gap-2 self-end md:self-auto pointer-events-auto">
+          {/* Mute Button */}
+          <button 
+            onClick={() => setIsMuted(!isMuted)}
+            className="p-2 bg-slate-950/85 hover:bg-slate-900 border border-slate-805 rounded text-slate-300 hover:text-white transition-all active:scale-95 flex items-center justify-center cursor-pointer"
+            title={isMuted ? "Unmute Audio" : "Mute Audio"}
+          >
+            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          </button>
+
+          {/* Regenerate Background Map Button */}
+          <button 
+            onClick={() => {
+              const { greenZones, roads, buildings, markers } = generateProceduralMap(CANVAS_WIDTH, CANVAS_HEIGHT);
+              mapDataRef.current = { greenZones, roads, buildings, markers };
+              soundManager.playRadar();
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-950/85 hover:bg-slate-900 border border-slate-805 rounded text-xs font-bold text-emerald-400 hover:text-emerald-300 transition-all active:scale-95 cursor-pointer"
+            title="Procedurally regenerate the map landscape & cities"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Regen Map</span>
+          </button>
+        </div>
+      </div>
+
       {/* Game Stage (True Fullscreen behind everything) */}
       <div 
         className="absolute inset-0 w-full h-full overflow-hidden cursor-crosshair z-0"
@@ -1057,50 +1751,7 @@ export default function App() {
         </AnimatePresence>
       </div>
 
-      {/* Floating Header HUD */}
-      <div className="absolute top-0 left-0 right-0 z-10 p-4 pt-[calc(env(safe-area-inset-top)+1rem)] max-w-lg mx-auto pointer-events-none select-none">
-        <div className="w-full flex flex-col gap-1 pointer-events-auto bg-slate-950/45 backdrop-blur-xs p-3 rounded-lg border border-slate-900/50">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2 text-emerald-500">
-                <Shield className="w-5 h-5" />
-                <span className="text-2xl font-black tracking-tighter">{gameState.health}%</span>
-              </div>
-              <button 
-                onClick={() => setIsMuted(!isMuted)}
-                className="p-2 hover:bg-slate-800/80 bg-slate-900/30 rounded-full transition-colors border border-slate-800/30"
-              >
-                {isMuted ? (
-                  <VolumeX className="w-5 h-5 text-slate-400" />
-                ) : (
-                  <Volume2 className="w-5 h-5 text-emerald-400 fill-current" />
-                )}
-              </button>
-            </div>
-            <div className="text-2xl font-black text-white tabular-nums tracking-tight filter drop-shadow">
-              {gameState.score.toLocaleString()}
-            </div>
-          </div>
-          <div className="flex justify-between text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold">
-            <span>Threat Level {gameState.level}</span>
-            <span>Interceptions {gameState.missilesIntercepted}</span>
-          </div>
-        </div>
-      </div>
 
-      {/* Floating Controls Footer */}
-      <div className="absolute bottom-0 left-0 right-0 z-10 p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pointer-events-none select-none text-center">
-        <div className="max-w-lg mx-auto flex justify-between items-center px-3 py-2 text-[9px] text-slate-400 uppercase tracking-widest font-bold bg-slate-950/45 backdrop-blur-xs rounded-lg border border-slate-900/50 pointer-events-auto">
-          <div className="flex items-center gap-2">
-            <Crosshair className="w-3.5 h-3.5" />
-            Manual Control
-          </div>
-          <div className="flex items-center gap-2">
-            <Activity className="w-3.5 h-3.5" />
-            System Ready
-          </div>
-        </div>
-      </div>
 
       {/* Decorative Glows */}
       <div className="fixed top-0 left-0 w-full h-full pointer-events-none opacity-20 overflow-hidden z-0">
