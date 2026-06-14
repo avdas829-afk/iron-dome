@@ -1682,7 +1682,7 @@ export default function App() {
           {/* Mute Button */}
           <button 
             onClick={() => setIsMuted(!isMuted)}
-            className="p-2 bg-slate-950/85 hover:bg-slate-900 border border-slate-805 rounded text-slate-300 hover:text-white transition-all active:scale-95 flex items-center justify-center cursor-pointer"
+            className="p-2 bg-slate-950/85 hover:bg-slate-900 border border-slate-800 rounded text-slate-300 hover:text-white transition-all active:scale-95 flex items-center justify-center cursor-pointer"
             title={isMuted ? "Unmute Audio" : "Mute Audio"}
           >
             {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
@@ -1695,7 +1695,7 @@ export default function App() {
               mapDataRef.current = { greenZones, roads, buildings, markers };
               soundManager.playRadar();
             }}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-950/85 hover:bg-slate-900 border border-slate-805 rounded text-xs font-bold text-emerald-400 hover:text-emerald-300 transition-all active:scale-95 cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-950/85 hover:bg-slate-900 border border-slate-800 rounded text-xs font-bold text-emerald-400 hover:text-emerald-300 transition-all active:scale-95 cursor-pointer"
             title="Procedurally regenerate the map landscape & cities"
           >
             <RefreshCw className="w-3.5 h-3.5" />
