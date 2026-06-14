@@ -942,6 +942,7 @@ export default function App() {
   const jetRef = useRef<FighterJet>(new FighterJet());
   const lastAutoFireRef = useRef<number>(0);
   const frameCountRef = useRef<number>(0);
+  const lastUpdateTimeRef = useRef<number>(0);
 
   const spawnEnemy = useCallback(() => {
     if (enemiesRef.current.length >= MAX_CONCURRENT_ENEMIES) return;
@@ -1052,8 +1053,17 @@ export default function App() {
     });
   }, [fireInterceptor]);
 
-  const update = useCallback(() => {
+  const update = useCallback((timestamp: number = performance.now()) => {
     if (gameStateRef.current.isGameOver) return;
+
+    // Throttle loop updates to ~60 FPS standard so game speed is identical
+    // across all high-refresh rates (e.g., 60Hz/90Hz/120Hz on Poco X5 Pro 5G)
+    const elapsed = timestamp - lastUpdateTimeRef.current;
+    if (lastUpdateTimeRef.current !== 0 && elapsed < 16.3) {
+      gameLoopRef.current = requestAnimationFrame(update);
+      return;
+    }
+    lastUpdateTimeRef.current = timestamp - (elapsed % 16.67);
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -1384,12 +1394,35 @@ export default function App() {
     ctx.strokeStyle = 'rgba(30, 41, 59, 0.22)';
     ctx.lineWidth = 1;
 
-    // Modern tracking coordinate labels on screen edges
-    ctx.fillStyle = 'rgba(148, 163, 184, 0.25)';
-    ctx.font = '7px monospace';
+    // Modern tracking coordinate labels / High-Tech Live HUD
+    // Translucent glassmorphism bar at the top of the simulation
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.68)';
+    ctx.fillRect(0, 0, CANVAS_WIDTH, 26);
+    
+    ctx.strokeStyle = 'rgba(16, 185, 129, 0.22)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, 26);
+    ctx.lineTo(CANVAS_WIDTH, 26);
+    ctx.stroke();
+
+    const hp = gameStateRef.current.health;
+    ctx.font = 'bold 9px monospace';
+    
+    // Status color-coding (Green -> Amber -> Red warning states)
+    ctx.fillStyle = hp <= 30 ? '#ef4444' : hp <= 60 ? '#fbbf24' : '#10b981';
     ctx.textAlign = 'left';
-    ctx.fillText('SYS LOC: 32°04\'N 34°47\'E', 12, 16);
-    ctx.fillText('IRON DOME GRID SENSOR-4', CANVAS_WIDTH - 125, 16);
+    ctx.fillText(`SYSTEM HP: ${hp}%`, 10, 16);
+
+    // Active tactical wave multiplier
+    ctx.fillStyle = '#38bdf8';
+    ctx.textAlign = 'center';
+    ctx.fillText(`GRID ALERT LVL: ${gameStateRef.current.level}`, CANVAS_WIDTH / 2, 16);
+
+    // Intercept Score tracking
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'right';
+    ctx.fillText(`SECURED SCORE: ${gameStateRef.current.score}`, CANVAS_WIDTH - 10, 16);
 
     // 5. Basestation/Battery Base Ground Plate (Sealing the very bottom cleanly)
     ctx.fillStyle = '#090d16'; // Deep space slate backboard
@@ -1648,6 +1681,7 @@ export default function App() {
     interceptorsRef.current = [];
     explosionsRef.current = [];
     frameCountRef.current = 0;
+    lastUpdateTimeRef.current = 0;
 
     // Procedurally regenerate background on game restart
     const { greenZones, roads, buildings, markers } = generateProceduralMap(CANVAS_WIDTH, CANVAS_HEIGHT);
