@@ -1,12 +1,12 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build",
-    "volt:build": "npm run build && npx shx rm -rf www && npx shx mkdir -p www && npx shx cp -r dist/* www/",
+    "build": "vite build && npx shx rm -rf www && npx shx mkdir -p www && npx shx cp -r dist/* www/",
+    "volt:build": "npm run build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"

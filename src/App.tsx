@@ -507,10 +507,9 @@ class Missile {
     this.vy = Math.sin(angle) * speed;
 
     if (this.isBomber) {
-      // Map speed to 3-8 taps
-      // Min bomber speed approx 0.126, Max approx 0.3675
-      const minS = ENEMY_SPEED_MIN * 0.6;
-      const maxS = ENEMY_SPEED_MAX * 0.6;
+      // Map speed to 3-8 taps based on realistic medium to very fast speeds
+      const minS = 1.2;
+      const maxS = 3.2;
       const t = 3 + ((speed - minS) / (maxS - minS)) * 5;
       this.requiredTaps = Math.max(3, Math.min(8, Math.round(t)));
     }
@@ -954,8 +953,20 @@ export default function App() {
       const targetX = (CANVAS_WIDTH * 0.1) + (Math.random() * CANVAS_WIDTH * 0.8);
       const isBomber = Math.random() < 0.25; // 25% chance to be a bomber
       
-      let speed = ENEMY_SPEED_MIN + (Math.random() * (ENEMY_SPEED_MAX - ENEMY_SPEED_MIN)) + (currentLevel * 0.005);
-      if (isBomber) speed *= 0.6; // Bombers are slower but more dangerous visually
+      let speed;
+      if (isBomber) {
+        // "speed should be random very fast and medium"
+        if (Math.random() < 0.5) {
+          // Medium speed
+          speed = 1.2 + Math.random() * 0.6 + (currentLevel * 0.01);
+        } else {
+          // Very fast speed
+          speed = 2.2 + Math.random() * 1.0 + (currentLevel * 0.01);
+        }
+      } else {
+        // Regular red missile speed
+        speed = ENEMY_SPEED_MIN + (Math.random() * (ENEMY_SPEED_MAX - ENEMY_SPEED_MIN)) + (currentLevel * 0.005);
+      }
 
       enemiesRef.current.push(new Missile(
         true, 
@@ -1567,11 +1578,16 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    gameLoopRef.current = requestAnimationFrame(update);
+    if (gameLoopRef.current) {
+      cancelAnimationFrame(gameLoopRef.current);
+    }
+    if (!gameState.isGameOver) {
+      gameLoopRef.current = requestAnimationFrame(update);
+    }
     return () => {
       if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
     };
-  }, [update]);
+  }, [update, gameState.isGameOver]);
 
   useEffect(() => {
     if (shake > 0) {
@@ -1642,7 +1658,7 @@ export default function App() {
     <div className="w-screen h-[100dvh] bg-slate-950 text-slate-200 font-mono overflow-hidden relative select-none">
       {/* Game Stage (True Fullscreen behind everything) */}
       <div 
-        className="absolute inset-0 w-full h-full overflow-hidden cursor-crosshair z-0"
+        className="absolute inset-0 w-full h-full overflow-hidden cursor-default z-0"
         style={{ 
           transform: `translate(${Math.random() * shake - shake/2}px, ${Math.random() * shake - shake/2}px)`,
         }}
