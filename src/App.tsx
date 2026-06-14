@@ -744,10 +744,10 @@ class FighterJet {
   lastFlybyTime: number = 0;
 
   constructor() {
-    this.x = Math.random() * CANVAS_WIDTH;
-    this.y = Math.random() * (BATTERY_Y - 40);
-    this.targetX = Math.random() * CANVAS_WIDTH;
-    this.targetY = Math.random() * (BATTERY_Y - 40);
+    this.x = 40 + Math.random() * (CANVAS_WIDTH - 80);
+    this.y = 40 + Math.random() * (BATTERY_Y - 80);
+    this.targetX = 40 + Math.random() * (CANVAS_WIDTH - 80);
+    this.targetY = 40 + Math.random() * (BATTERY_Y - 80);
   }
 
   update(enemies: Missile[]) {
@@ -774,8 +774,8 @@ class FighterJet {
       // If reached patrol target, pick a new one
       const distToTarget = Math.hypot(this.targetX - this.x, this.targetY - this.y);
       if (distToTarget < 20) {
-        this.targetX = Math.random() * CANVAS_WIDTH;
-        this.targetY = Math.random() * (BATTERY_Y - 40);
+        this.targetX = 40 + Math.random() * (CANVAS_WIDTH - 80);
+        this.targetY = 40 + Math.random() * (BATTERY_Y - 80);
       }
     }
 
@@ -928,6 +928,11 @@ export default function App() {
     level: 1,
     missilesIntercepted: 0
   });
+
+  const gameStateRef = useRef<GameState>(gameState);
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
   
   const [shake, setShake] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
@@ -942,13 +947,14 @@ export default function App() {
   const spawnEnemy = useCallback(() => {
     if (enemiesRef.current.length >= MAX_CONCURRENT_ENEMIES) return;
 
-    const spawnRate = 0.01 + (gameState.level * 0.005);
+    const currentLevel = gameStateRef.current.level;
+    const spawnRate = 0.01 + (currentLevel * 0.005);
     if (Math.random() < spawnRate) {
       const startX = Math.random() * CANVAS_WIDTH;
       const targetX = (CANVAS_WIDTH * 0.1) + (Math.random() * CANVAS_WIDTH * 0.8);
       const isBomber = Math.random() < 0.25; // 25% chance to be a bomber
       
-      let speed = ENEMY_SPEED_MIN + (Math.random() * (ENEMY_SPEED_MAX - ENEMY_SPEED_MIN)) + (gameState.level * 0.005);
+      let speed = ENEMY_SPEED_MIN + (Math.random() * (ENEMY_SPEED_MAX - ENEMY_SPEED_MIN)) + (currentLevel * 0.005);
       if (isBomber) speed *= 0.6; // Bombers are slower but more dangerous visually
 
       enemiesRef.current.push(new Missile(
@@ -961,7 +967,7 @@ export default function App() {
         isBomber
       ));
     }
-  }, [gameState.level]);
+  }, []);
 
   const fireInterceptor = useCallback((targetX: number, targetY: number, sourceX: number, sourceY: number = BATTERY_Y, isAuto: boolean = false, isFromJet: boolean = false) => {
     // Limit ground battery (Iron Dome) to 1 active projectile in flight
@@ -1036,7 +1042,7 @@ export default function App() {
   }, [fireInterceptor]);
 
   const update = useCallback(() => {
-    if (gameState.isGameOver) return;
+    if (gameStateRef.current.isGameOver) return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -1366,15 +1372,6 @@ export default function App() {
     // 4. Drawing high-tech overlay details (Radar alignment markings & telemetry markers)
     ctx.strokeStyle = 'rgba(30, 41, 59, 0.22)';
     ctx.lineWidth = 1;
-    // Map overlay grid intersections markers
-    for (let x = 100; x < CANVAS_WIDTH; x += 100) {
-      for (let y = 100; y < CANVAS_HEIGHT; y += 100) {
-        ctx.beginPath();
-        ctx.moveTo(x - 5, y); ctx.lineTo(x + 5, y);
-        ctx.moveTo(x, y - 5); ctx.lineTo(x, y + 5);
-        ctx.stroke();
-      }
-    }
 
     // Modern tracking coordinate labels on screen edges
     ctx.fillStyle = 'rgba(148, 163, 184, 0.25)';
@@ -1459,8 +1456,9 @@ export default function App() {
 
     runAI();
 
-    // Update & Draw Enemies
-    enemiesRef.current.forEach((m, index) => {
+    // Update & Draw Enemies in reverse
+    for (let i = enemiesRef.current.length - 1; i >= 0; i--) {
+      const m = enemiesRef.current[i];
       // Radar Detection Logic: Only lock when radar beam touches it
       const distToB = Math.hypot(m.x - BATTERY_X, m.y - BATTERY_Y);
       const angleToM = Math.atan2(m.y - BATTERY_Y, m.x - BATTERY_X);
@@ -1491,75 +1489,82 @@ export default function App() {
       if (m.exploded) {
         if (m.y >= BATTERY_Y) {
           explosionsRef.current.push(new Explosion(m.x, m.y, 60, true));
-          setGameState(prev => ({ ...prev, health: Math.max(0, prev.health - 10) }));
+          setGameState(prev => {
+            const nextHealth = Math.max(0, prev.health - 10);
+            return {
+              ...prev,
+              health: nextHealth,
+              isGameOver: nextHealth <= 0
+            };
+          });
           setShake(10);
           soundManager.playHit(true);
         }
-        enemiesRef.current.splice(index, 1);
+        enemiesRef.current.splice(i, 1);
       }
-    });
+    }
 
-    // Update & Draw Interceptors
-    interceptorsRef.current.forEach((m, index) => {
+    // Update & Draw Interceptors in reverse
+    for (let i = interceptorsRef.current.length - 1; i >= 0; i--) {
+      const m = interceptorsRef.current[i];
       m.update();
 
       // Collision Detection: Precise missile-to-missile contact
-      enemiesRef.current.forEach((en) => {
+      for (let j = enemiesRef.current.length - 1; j >= 0; j--) {
+        const en = enemiesRef.current[j];
+        if (en.exploded) continue;
+
         const dist = Math.hypot(en.x - m.x, en.y - m.y);
         const hitThreshold = en.isBomber ? 20 : 12; // Larger hit box for bombers
 
         if (dist < hitThreshold) { // Precise touch threshold
           // Jet shots can ONLY hit Bomber Planes
-          if (m.isFromJet && !en.isBomber) return;
+          if (m.isFromJet && !en.isBomber) continue;
           
           // Ground shots (Iron Dome) can NOT hit Bomber Planes
-          if (!m.isFromJet && en.isBomber) return;
+          if (!m.isFromJet && en.isBomber) continue;
 
           en.exploded = true;
           m.exploded = true;
           soundManager.playHit(en.isBomber);
-          setGameState(prev => ({ 
-            ...prev, 
-            score: prev.score + 100,
-            missilesIntercepted: prev.missilesIntercepted + 1
-          }));
+          
+          setGameState(prev => {
+            const nextIntercepted = prev.missilesIntercepted + 1;
+            let nextLevel = prev.level;
+            if (nextIntercepted > 0 && nextIntercepted % 10 === 0) {
+              nextLevel = Math.floor(nextIntercepted / 10) + 1;
+            }
+            return {
+              ...prev,
+              score: prev.score + 100,
+              missilesIntercepted: nextIntercepted,
+              level: nextLevel
+            };
+          });
         }
-      });
+      }
 
       m.draw(ctx);
 
       if (m.exploded) {
         explosionsRef.current.push(new Explosion(m.x, m.y, EXPLOSION_MAX_RADIUS, false, m.isAuto));
-        interceptorsRef.current.splice(index, 1);
+        interceptorsRef.current.splice(i, 1);
       }
-    });
+    }
 
-    // Update & Draw Explosions
-    explosionsRef.current.forEach((e, index) => {
+    // Update & Draw Explosions in reverse
+    for (let i = explosionsRef.current.length - 1; i >= 0; i--) {
+      const e = explosionsRef.current[i];
       e.update();
       e.draw(ctx);
 
       if (e.life <= 0) {
-        explosionsRef.current.splice(index, 1);
+        explosionsRef.current.splice(i, 1);
       }
-    });
-
-    // Level up logic
-    if (gameState.missilesIntercepted > 0 && gameState.missilesIntercepted % 10 === 0) {
-      setGameState(prev => ({ 
-        ...prev, 
-        level: Math.floor(prev.missilesIntercepted / 10) + 1,
-        missilesIntercepted: prev.missilesIntercepted + 1 
-      }));
-    }
-
-    // Game Over check
-    if (gameState.health <= 0 && !gameState.isGameOver) {
-      setGameState(prev => ({ ...prev, isGameOver: true }));
     }
 
     gameLoopRef.current = requestAnimationFrame(update);
-  }, [gameState.isGameOver, gameState.health, gameState.level, gameState.missilesIntercepted, spawnEnemy, runAI]);
+  }, []);
 
   useEffect(() => {
     gameLoopRef.current = requestAnimationFrame(update);
@@ -1635,75 +1640,6 @@ export default function App() {
 
   return (
     <div className="w-screen h-[100dvh] bg-slate-950 text-slate-200 font-mono overflow-hidden relative select-none">
-      {/* Tactical Header HUD */}
-      <div className="fixed top-3 left-3 right-3 z-10 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 pointer-events-none select-none">
-        {/* Left Stats Section */}
-        <div className="flex flex-wrap items-center gap-3 pointer-events-auto">
-          {/* Health Bar Grid */}
-          <div className="bg-slate-950/85 backdrop-blur-md px-3 py-2 rounded border border-slate-800 flex items-center gap-3">
-            <div className="flex flex-col">
-              <span className="text-[9px] text-slate-400 uppercase tracking-wider font-semibold">Base Health</span>
-              <div className="flex items-center gap-2 mt-0.5">
-                <div className="w-24 h-2.5 bg-slate-800 rounded-sm overflow-hidden border border-slate-700/50 relative">
-                  <motion.div 
-                    initial={{ width: "100%" }}
-                    animate={{ width: `${gameState.health}%` }}
-                    transition={{ duration: 0.3 }}
-                    className={`h-full ${gameState.health > 40 ? 'bg-emerald-500' : 'bg-red-500'}`}
-                  />
-                </div>
-                <span className={`text-xs font-bold ${gameState.health > 40 ? 'text-emerald-400' : 'text-red-400'}`}>{gameState.health}%</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-slate-950/85 backdrop-blur-md px-3 py-2 rounded border border-slate-800 flex items-center gap-4">
-            <div className="flex flex-col">
-              <span className="text-[9px] text-slate-400 uppercase tracking-wider font-semibold">Level</span>
-              <span className="text-sm font-bold text-cyan-400 mt-0.5">0{gameState.level}</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-[9px] text-slate-400 uppercase tracking-wider font-semibold">Intercepts</span>
-              <span className="text-sm font-bold text-white mt-0.5">{gameState.missilesIntercepted}</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-[9px] text-slate-400 uppercase tracking-wider font-semibold">Active Threats</span>
-              <span className="text-sm font-bold text-red-400 mt-0.5">{enemiesRef.current.length}</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-[9px] text-slate-400 uppercase tracking-wider font-semibold">T-Score</span>
-              <span className="text-sm font-bold text-emerald-400 mt-0.5">{gameState.score}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Controls Panel */}
-        <div className="flex items-center gap-2 self-end md:self-auto pointer-events-auto">
-          {/* Mute Button */}
-          <button 
-            onClick={() => setIsMuted(!isMuted)}
-            className="p-2 bg-slate-950/85 hover:bg-slate-900 border border-slate-800 rounded text-slate-300 hover:text-white transition-all active:scale-95 flex items-center justify-center cursor-pointer"
-            title={isMuted ? "Unmute Audio" : "Mute Audio"}
-          >
-            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-          </button>
-
-          {/* Regenerate Background Map Button */}
-          <button 
-            onClick={() => {
-              const { greenZones, roads, buildings, markers } = generateProceduralMap(CANVAS_WIDTH, CANVAS_HEIGHT);
-              mapDataRef.current = { greenZones, roads, buildings, markers };
-              soundManager.playRadar();
-            }}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-950/85 hover:bg-slate-900 border border-slate-800 rounded text-xs font-bold text-emerald-400 hover:text-emerald-300 transition-all active:scale-95 cursor-pointer"
-            title="Procedurally regenerate the map landscape & cities"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Regen Map</span>
-          </button>
-        </div>
-      </div>
-
       {/* Game Stage (True Fullscreen behind everything) */}
       <div 
         className="absolute inset-0 w-full h-full overflow-hidden cursor-crosshair z-0"
