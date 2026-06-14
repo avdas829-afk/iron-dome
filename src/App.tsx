@@ -597,6 +597,8 @@ class Missile {
   maxTrailLength = 20;
   targetEnemy: Missile | null = null;
   baseSpeed: number = 0;
+  wanderTargetX: number = 0;
+  wanderTargetY: number = 0;
 
   constructor(isEnemy: boolean, start: Point, target: Point, speed: number, isAuto: boolean = false, isFromJet: boolean = false, isBomber: boolean = false) {
     this.isEnemy = isEnemy;
@@ -621,6 +623,10 @@ class Missile {
       const maxS = 0.8;
       const t = 3 + ((speed - minS) / (maxS - minS || 1)) * 3;
       this.requiredTaps = Math.max(3, Math.min(6, Math.round(t)));
+      
+      // Initialize wandering targets for free aesthetic flight path
+      this.wanderTargetX = Math.random() * CANVAS_WIDTH;
+      this.wanderTargetY = start.y + 30 + Math.random() * 40;
     }
   }
 
@@ -628,6 +634,26 @@ class Missile {
     this.trail.push({ x: this.x, y: this.y });
     if (this.trail.length > this.maxTrailLength) {
       this.trail.shift();
+    }
+
+    // Dynamic flight behavior for Bomber plane (moves freely like fighter jet)
+    if (this.isEnemy && this.isBomber) {
+      const distToTarget = Math.hypot(this.wanderTargetX - this.x, this.wanderTargetY - this.y);
+      if (distToTarget < 30 || Math.random() < 0.008) {
+        this.wanderTargetX = 40 + Math.random() * (CANVAS_WIDTH - 80);
+        // Slowly drift downwards as part of their looming assault profile
+        const descentProgress = 35 + Math.random() * 25;
+        this.wanderTargetY = Math.min(BATTERY_Y + 5, this.wanderTargetY + descentProgress);
+      }
+
+      const angleToTarget = Math.atan2(this.wanderTargetY - this.y, this.wanderTargetX - this.x);
+      const targetVx = Math.cos(angleToTarget) * this.baseSpeed;
+      const targetVy = Math.sin(angleToTarget) * this.baseSpeed;
+
+      // Smooth steering interpolation (exactly identical structure to jet logic)
+      const turnSpeed = 0.04;
+      this.vx += (targetVx - this.vx) * turnSpeed;
+      this.vy += (targetVy - this.vy) * turnSpeed;
     }
 
     // Dynamic Homing Track behavior for interceptor missiles
